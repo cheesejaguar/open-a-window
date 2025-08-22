@@ -1,0 +1,12 @@
+{
+  "title": "Evening Cooler Alert",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Evening Cooler Alert",
+        "description": "Send one alert each evening when it's cooler outside than inside."
+      }
+    }
+  }
+}
+
