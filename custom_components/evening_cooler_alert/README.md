@@ -1,105 +1,133 @@
-# Evening Cooler Alert
+# Evening Cooler Alert (Home Assistant)
 
-Send exactly one alert each evening (after sunset) when it becomes cooler outside than inside by a configurable delta. Designed for Nest (or any climate entity exposing `current_temperature`) with an outdoor temperature sensor.
+Send exactly one alert each evening (after sunset) when it’s cooler outside than inside by a configurable delta. Ideal for Nest thermostats (uses `current_temperature`) and any numeric outdoor temperature sensor.
+
+**Domain**: `evening_cooler_alert`  •  **Path**: `custom_components/evening_cooler_alert/`
 
 ## Features
-
 - One notification per evening after sunset
-- Compares outdoor sensor with Nest `current_temperature`
-- Configurable delta threshold (default 2.0 °)
-- Optional sunset offset and latest evening time window
-- Stability window (hysteresis) to avoid flapping
-- Daily reset time (default 12:00) to allow a new alert next evening
-- Persisted state across restarts (sent_today and last_sent)
-- Exposes a binary sensor for visibility and a reset button
-- Multiple entries supported (e.g., different rooms/sensors)
+- Compares outdoor sensor vs. Nest `current_temperature`
+- Delta threshold (default 2.0 °) and optional stability window
+- Sunset offset and “latest evening” time window
+- Daily reset time (default 12:00)
+- Restart-safe persistence (`sent_today`, `last_sent`)
+- Entities: binary sensor + reset button
+- Multiple entries supported (different rooms/sensors)
 
-## Installation
+## Requirements
+- Home Assistant OS (HAOS) or Core/Supervised with access to `config/custom_components`
+- One climate entity (e.g., `climate.living_room`) exposing `current_temperature`
+- One outdoor temperature sensor (e.g., `sensor.outdoor_temperature`) with numeric state
+- A working `notify.*` service (mobile app, persistent notifications, etc.)
 
-1. Copy this folder to `custom_components/evening_cooler_alert/` in your Home Assistant config directory.
-2. Restart Home Assistant.
-3. Go to Settings → Integrations → Add Integration → search for "Evening Cooler Alert".
+## Install on HAOS
+Manual installation is simplest on HAOS via the Samba or SSH add-on.
+
+1) Enable file access
+- Add-on store → install and start either:
+  - Samba share (access `\<HA_IP>\config` from your computer), or
+  - SSH & Web Terminal (access `/config` over SSH).
+
+2) Copy the integration
+- On your PC: create the folder `config/custom_components/evening_cooler_alert/`.
+- Copy this repository’s `custom_components/evening_cooler_alert/` contents into that folder.
+
+Final structure should look like:
+```
+/config/custom_components/evening_cooler_alert/
+  __init__.py
+  manifest.json
+  const.py
+  coordinator.py
+  binary_sensor.py
+  button.py
+  entity.py
+  config_flow.py
+  strings.json
+  translations/en.json
+```
+
+3) Restart Home Assistant
+- Settings → System → Restart (or `Developer Tools → YAML → Restart`).
+
+4) Add the integration
+- Settings → Devices & Services → Add Integration → search for “Evening Cooler Alert”.
+
+### Upgrading
+- Replace the files in `/config/custom_components/evening_cooler_alert/` with the new version.
+- Restart Home Assistant.
 
 ## Configuration (UI)
-
-- Name: Display name for this alert (default: "Evening Cooler Alert"). Used to build the entity slug.
-- Nest climate entity: Choose your Nest climate entity (domain `climate.*`). The integration reads `current_temperature`.
-- Outdoor temperature entity: Choose the sensor that represents outdoor temperature (domain `sensor.*`). Must be numeric.
-- Delta threshold: Minimum difference (inside - outside) to trigger notification. Default 2.0.
-- Notify service: A `notify.*` service to call (e.g., `notify.mobile_app_phone`).
-- Sunset offset minutes: Shift the sunset trigger by minutes (negative for earlier). Default 0.
-- Evening latest time: Optional HH:MM. If set, alerts only occur before this time.
-- Daily reset time: Time of day to clear the "sent today" flag (default 12:00).
-- Stability window seconds: If > 0, the condition must hold continuously for this many seconds before firing (default 0).
-- Notification title: Title for the notification (default: "Cooler Outside Now").
-- Notification body template: Jinja template with variables `inside`, `outside`, and `delta`.
-
-### Template variables
-
-- `inside`: Current inside temperature (float)
-- `outside`: Current outside temperature (float)
-- `delta`: Difference `inside - outside` at send time (float, rounded)
+- Name: Display name (default: “Evening Cooler Alert”). Used to derive entity slugs.
+- Nest climate entity: Pick your `climate.*` entity; the integration reads `current_temperature`.
+- Outdoor temperature entity: Pick your `sensor.*` entity; must be numeric.
+- Delta threshold: Required difference (inside - outside) to alert. Default 2.0.
+- Notify service: A `notify.*` service (e.g., `notify.mobile_app_pixel_8` or `notify.persistent_notification`).
+- Sunset offset minutes: Shift sunset trigger by minutes (negative = earlier). Default 0.
+- Evening latest time: Optional HH:MM; suppress alerts after this time.
+- Daily reset time: Time of day to clear the “sent today” flag (default 12:00).
+- Stability window seconds: Require condition to hold continuously for this many seconds before sending (default 0).
+- Notification title: Default “Cooler Outside Now”.
+- Notification body template: Jinja template; variables: `inside`, `outside`, `delta`.
 
 Example body:
 ```
 Outside ({{ outside }}°) is cooler than inside ({{ inside }}°) by {{ delta }}°.
-Try opening some windows to cool down naturally.
+Open some windows to cool down naturally.
 ```
 
-## How It Works
+### Editing options later
+- Settings → Devices & Services → Evening Cooler Alert → Configure.
 
-1. The integration monitors:
-   - Outdoor sensor changes
-   - Climate entity changes (for `current_temperature`)
-   - Sunset (with optional offset)
-   - Every 5 minutes during the evening window (after sunset and before latest time if set)
-2. When `outside < inside - delta` holds after sunset and `sent_today` is false:
-   - If `stability_window` is 0: sends notification immediately.
-   - If `stability_window` > 0: verifies the condition remains true for the specified seconds before sending.
-3. After sending, it sets `sent_today = true` and records `last_sent`.
-4. At the daily reset time (default 12:00), it clears `sent_today`.
-5. State persists across restarts.
+## How It Works
+1) Listens for: outdoor temp changes, climate entity changes, sunset (with offset), and a 5‑minute tick in the evening window.
+2) When after sunset (and before latest time if set) and `outside < inside - delta`:
+   - If `stability_window == 0`: sends immediately.
+   - Else: confirms the condition stays true for the configured seconds, then sends.
+3) Sets `sent_today = true` and stores `last_sent`.
+4) At the daily reset time, clears `sent_today`.
+5) State is persisted across restarts.
 
 ## Entities
-
 - Binary sensor: `<slug>_outside_cooler_than_inside_by_delta`
-  - State: ON when `outside < inside - delta`
-  - Attributes: `inside`, `outside`, `delta`, `sent_today`, `last_sent`, `sunset_offset_min`, `last_sunset`, `stability_window`, `evening_latest`, `daily_reset`
+  - On when `outside < inside - delta`.
+  - Attributes: `inside`, `outside`, `delta`, `sent_today`, `last_sent`, `sunset_offset_min`, `last_sunset`, `stability_window`, `evening_latest`, `daily_reset`.
 
 - Button: `<slug>_reset_today`
   - Press to clear `sent_today` immediately.
 
-The `slug` is derived from the configured Name (lowercase, spaces to underscores). Multiple integrations can coexist with different names.
+`<slug>` is derived from the configured Name (lowercase; spaces → underscores). Multiple entries can coexist with different names.
 
 ## Examples
-
-- Typical setup: `climate.living_room`, `sensor.outdoor_temp`, delta `2.0`, notify `notify.mobile_app_mypixel`.
-- Sunset offset: Set `-30` to start checking 30 minutes before sunset.
-- Latest time: Set `22:30` to avoid late-night notifications.
-- Stability: Set `300` seconds to require 5 minutes of stable coolness difference.
+- Typical: `climate.living_room`, `sensor.backyard_temp`, delta `2.0`, notify `notify.mobile_app_mypixel`.
+- Earlier checks: sunset offset `-30` (start 30 minutes before sunset).
+- Quiet hours: latest time `22:30` to avoid late-night alerts.
+- Flapping protection: stability `300` (5 minutes).
 
 ## Troubleshooting
-
-- No notification sent:
-  - Verify the outdoor sensor and climate `current_temperature` are available and numeric.
-  - Check the binary sensor state and attributes to see if the condition is true.
-  - Confirm you are after sunset or within your configured evening window.
-  - Ensure your `notify.*` service exists and is working (try calling it from Developer Tools).
-
-- Multiple entries: You can add another instance with a different name and sensor/climate pairing.
+- No alert received:
+  - Verify `notify.*` service exists (Developer Tools → Services).
+  - Check the binary sensor state; confirm the attributes show valid `inside`/`outside` numbers.
+  - Ensure it’s after sunset (respecting any offset) and before your latest time.
+  - Confirm the climate entity exposes `current_temperature` and it’s available.
+- Re-send tonight: use the `<slug>_reset_today` button.
+- Logs: Settings → System → Logs; filter by `custom_components.evening_cooler_alert`.
 
 ## Advanced Use
-
-- Multiple Nests: Create separate entries per room/thermostat and sensor.
-- Averaging sensors: Use a template sensor or a statistics/average sensor as the outdoor source, then point this integration to that sensor.
+- Multiple Nests/rooms: Add multiple entries, each with its own climate and sensor.
+- Averaging or filtering: Create a template/average sensor from multiple outdoor sensors, then select it here.
 
 ## FAQ
+- Does it require the Sun integration?
+  - It listens for sunset; if unavailable, it approximates until the first sunset event occurs. You may use a negative offset to start checks earlier.
+- Will I get spammed?
+  - No. It sends at most one alert per day (reset at your chosen time).
+- Can I customize the message?
+  - Yes. Use the title and body template; variables: `inside`, `outside`, `delta`.
 
-- Does it work without the Sun integration? Yes, it listens for sunset events if available and falls back to a late-afternoon approximation until first sunset is received. You can also use a negative offset to start earlier.
-- Will it spam me? No, it sends at most one notification per day and only in the evening window.
-- Can I change the message? Yes, use the title and body template fields; the body supports `inside`, `outside`, and `delta` variables.
+## Uninstall
+- Remove the integration instance from Settings → Devices & Services.
+- Optionally delete the folder `/config/custom_components/evening_cooler_alert/` and restart HA.
 
 ## License
-
 MIT
-
